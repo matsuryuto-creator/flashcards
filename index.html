@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<!-- スマホ表示の基本設定（縦向き・幅に合わせる） -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<!-- iOSでホーム画面に追加したときにアプリ風（全画面）で開く設定 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#2f6fed">
+<title>フラッシュカード</title>
+
+<style>
+/* ===== 全体のリセットと基本スタイル ===== */
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  margin: 0; padding: 0; height: 100%;
+  /* 端末標準のフォントのみ使用（Webフォント読み込みなし＝完全オフライン） */
+  font-family: -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif;
+  background: #eef1f6;
+  color: #1c2430;
+  /* iOSでの過剰な拡大を防止 */
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  display: flex; justify-content: center;
+  /* iPhoneのノッチ・ホームバーを避ける余白 */
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+}
+
+/* ===== アプリ全体のレイアウト（縦1列・画面いっぱい） ===== */
+#app {
+  width: 100%;
+  max-width: 480px;   /* スマホ幅を主対象。PCでも中央に収まる */
+  min-height: 100vh;
+  display: flex; flex-direction: column;
+  padding: 12px 14px;
+}
+
+/* ===== 上部バー（フィルタ・トグル） ===== */
+.toolbar {
+  display: flex; flex-direction: column; gap: 10px;
+  margin-bottom: 12px;
+}
+.row { display: flex; gap: 10px; align-items: center; }
+
+select {
+  flex: 1;
+  font-size: 17px;
+  padding: 12px 12px;
+  border: 1px solid #c3ccda;
+  border-radius: 12px;
+  background: #fff;
+  color: #1c2430;
+  min-height: 48px;   /* タップ領域を大きく */
+}
+
+/* トグルスイッチ（シャッフル・要復習だけ表示） */
+.toggle {
+  display: flex; align-items: center; justify-content: space-between;
+  flex: 1;
+  background: #fff;
+  border: 1px solid #c3ccda;
+  border-radius: 12px;
+  padding: 10px 14px;
+  min-height: 48px;
+  font-size: 15px;
+  user-select: none;
+}
+.toggle input { display: none; }
+.switch {
+  width: 46px; height: 28px; border-radius: 999px;
+  background: #c3ccda; position: relative; transition: background .2s; flex: none;
+}
+.switch::after {
+  content: ""; position: absolute; top: 3px; left: 3px;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: #fff; transition: transform .2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,.25);
+}
+.toggle input:checked + .switch { background: #2f6fed; }
+.toggle input:checked + .switch::after { transform: translateX(18px); }
+
+/* ===== カード表示エリア ===== */
+.card-area {
+  flex: 1;                 /* 残りの高さをすべて使う */
+  display: flex; align-items: center; justify-content: center;
+  /* カードの3D回転を見せるための遠近感 */
+  perspective: 1200px;
+  min-height: 320px;
+  margin-bottom: 8px;
+}
+.card {
+  width: 100%; height: 100%;
+  position: relative;
+  cursor: pointer;
+  /* 子要素(表・裏)を3D空間に配置 */
+  transform-style: preserve-3d;
+  transition: transform .5s;
+}
+/* .is-flipped が付くとY軸で180度回転＝裏返る */
+.card.is-flipped { transform: rotateY(180deg); }
+
+/* 表面・裏面の共通スタイル */
+.face {
+  position: absolute; inset: 0;
+  border-radius: 20px;
+  padding: 24px 20px;
+  display: flex; flex-direction: column;
+  box-shadow: 0 6px 18px rgba(31,50,80,.14);
+  /* 裏側になった面を隠す */
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  overflow-y: auto;
+}
+.face-front { background: #ffffff; }
+/* 裏面は最初から180度回しておく（表と背中合わせ） */
+.face-back { background: #f0f7ff; transform: rotateY(180deg); }
+
+/* カード上部の小さなラベル（科目・問題番号・マーク状態） */
+.card-meta {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: #6b7688; margin-bottom: 14px;
+}
+.tag {
+  background: #e7edf7; color: #3a5b91;
+  padding: 3px 10px; border-radius: 999px; font-weight: 600;
+}
+.mark-badge { margin-left: auto; font-weight: 700; }
+.mark-badge.known  { color: #1f9d55; }
+.mark-badge.review { color: #e07b00; }
+
+/* 問題文・回答文 */
+.q-label { font-size: 12px; color: #9aa4b4; letter-spacing: .05em; margin-bottom: 6px; }
+.q-text {
+  font-size: 24px; line-height: 1.5; font-weight: 700;
+  display: flex; align-items: center; flex: 1;
+}
+.a-text { font-size: 23px; line-height: 1.5; font-weight: 700; margin-bottom: 14px; }
+.note {
+  font-size: 15px; line-height: 1.6; color: #46536b;
+  border-top: 1px dashed #c9d3e2; padding-top: 12px; margin-top: 4px;
+  white-space: pre-wrap;   /* 改行をそのまま表示 */
+}
+.tap-hint { text-align: center; font-size: 12px; color: #aeb6c4; margin-top: 12px; }
+
+/* データが無いときの表示 */
+.empty {
+  text-align: center; color: #6b7688; font-size: 16px; line-height: 1.7;
+  padding: 40px 20px;
+}
+
+/* ===== マークボタン（覚えた／要復習） ===== */
+.mark-buttons { display: flex; gap: 10px; margin: 8px 0 12px; }
+.mark-btn {
+  flex: 1; min-height: 52px;
+  font-size: 16px; font-weight: 700;
+  border: 2px solid #c3ccda; border-radius: 14px;
+  background: #fff; color: #46536b;
+}
+.mark-btn.active-known  { border-color: #1f9d55; background: #e7f7ee; color: #157a41; }
+.mark-btn.active-review { border-color: #e07b00; background: #fff3e2; color: #b56200; }
+
+/* ===== 下部ナビ（前へ／位置／次へ） ===== */
+.nav { display: flex; align-items: center; gap: 10px; }
+.nav-btn {
+  flex: 1; min-height: 60px;   /* 親指で押しやすい大きなボタン */
+  font-size: 18px; font-weight: 700;
+  border: none; border-radius: 16px;
+  background: #2f6fed; color: #fff;
+}
+.nav-btn:disabled { background: #b9c4d6; }
+.nav-btn:active:not(:disabled) { background: #2358c9; }
+.position {
+  min-width: 74px; text-align: center;
+  font-size: 18px; font-weight: 700; color: #46536b;
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ▼ 上部：科目フィルタ・シャッフル・要復習だけ表示 -->
+  <div class="toolbar">
+    <div class="row">
+      <select id="subjectFilter" aria-label="科目でしぼり込み"></select>
+    </div>
+    <div class="row">
+      <label class="toggle">
+        <span>🔀 シャッフル</span>
+        <input type="checkbox" id="shuffleToggle">
+        <span class="switch"></span>
+      </label>
+      <label class="toggle">
+        <span>★ 要復習だけ</span>
+        <input type="checkbox" id="reviewToggle">
+        <span class="switch"></span>
+      </label>
+    </div>
+  </div>
+
+  <!-- ▼ カード本体（タップで裏返る） -->
+  <div class="card-area">
+    <div class="card" id="card">
+      <!-- 表面：問題 -->
+      <div class="face face-front">
+        <div class="card-meta">
+          <span class="tag" id="frontSubject"></span>
+          <span id="frontNo"></span>
+          <span class="mark-badge" id="frontBadge"></span>
+        </div>
+        <div class="q-label">問題</div>
+        <div class="q-text" id="questionText"></div>
+        <div class="tap-hint">タップで答えを見る</div>
+      </div>
+      <!-- 裏面：回答＋解説 -->
+      <div class="face face-back">
+        <div class="card-meta">
+          <span class="tag" id="backSubject"></span>
+          <span id="backNo"></span>
+          <span class="mark-badge" id="backBadge"></span>
+        </div>
+        <div class="q-label">回答</div>
+        <div class="a-text" id="answerText"></div>
+        <div class="note" id="noteText"></div>
+        <div class="tap-hint">タップで問題に戻る</div>
+      </div>
+    </div>
+    <!-- 出題対象が0件のときに表示 -->
+    <div class="empty" id="emptyMessage" style="display:none;"></div>
+  </div>
+
+  <!-- ▼ 覚えた／要復習 マークボタン -->
+  <div class="mark-buttons">
+    <button class="mark-btn" id="knownBtn">✓ 覚えた</button>
+    <button class="mark-btn" id="reviewBtn">★ 要復習</button>
+  </div>
+
+  <!-- ▼ 下部ナビ -->
+  <div class="nav">
+    <button class="nav-btn" id="prevBtn">◀ 前へ</button>
+    <div class="position" id="position">0 / 0</div>
+    <button class="nav-btn" id="nextBtn">次へ ▶</button>
+  </div>
+
+</div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   ★★★ ここを書き換えてください（問題データ）★★★
+   CSV（科目, 問題番号, 問題, 回答, 解説）の各行を
+   下の1行 { ... } に置き換えていくだけです。
+   ・subject      = 科目
+   ・no           = 問題番号
+   ・question     = 問題（カード表面）
+   ・answer       = 回答（カード裏面）
+   ・explanation  = 解説（回答の下に表示。空 "" でもOK）
+   ※ 解説内で改行したいときは \n と書くと改行されます。
+   ============================================================ */
+const CARDS = [
+  { subject: "英単語", no: "1", question: "apple",  answer: "りんご",   explanation: "果物の一種。" },
+  { subject: "英単語", no: "2", question: "run",    answer: "走る",     explanation: "run - ran - run と変化します。" },
+  { subject: "歴史",   no: "1", question: "1600年に起きた戦いは？", answer: "関ヶ原の戦い", explanation: "徳川家康が勝利し、天下統一へ向かいました。" },
+];
+/* ★★★ 書き換えはここまで ★★★ */
+
+
+/* ============================================================
+   これより下はプログラム本体です（通常は変更不要）。
+   ============================================================ */
+
+// localStorageに保存するときのキー名
+const STORAGE_KEY = "flashcard_marks_v1";
+
+// 1枚のカードを一意に識別する内部キー（科目＋問題番号）
+// ※問題番号が科目をまたいで重複しても混ざらないようにするため
+function cardKey(card) {
+  return card.subject + "|" + card.no;
+}
+
+/* ---- マーク状態（覚えた／要復習）の読み書き ----
+   保存形式: { "英単語|1": "known", "歴史|1": "review", ... } */
+let marks = loadMarks();
+
+// localStorageから読み込み（使えない環境ではメモリのみで動作）
+function loadMarks() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    // localStorageが無効・失敗しても止めない（フォールバック）
+    return {};
+  }
+}
+// localStorageへ保存（失敗しても無視して継続）
+function saveMarks() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(marks));
+  } catch (e) {
+    // 保存できないだけ。アプリは通常どおり動く（リロードで消えるのみ）
+  }
+}
+
+/* ---- 画面の状態を管理する変数 ---- */
+let deck = [];        // 現在出題中のカード配列（フィルタ・シャッフル適用後）
+let index = 0;        // deck内の現在位置
+let isFlipped = false;// 裏返っているか
+
+/* ---- HTML要素の取得 ---- */
+const el = {
+  subjectFilter: document.getElementById("subjectFilter"),
+  shuffleToggle: document.getElementById("shuffleToggle"),
+  reviewToggle: document.getElementById("reviewToggle"),
+  card: document.getElementById("card"),
+  cardArea: document.querySelector(".card-area"),
+  emptyMessage: document.getElementById("emptyMessage"),
+  frontSubject: document.getElementById("frontSubject"),
+  frontNo: document.getElementById("frontNo"),
+  frontBadge: document.getElementById("frontBadge"),
+  backSubject: document.getElementById("backSubject"),
+  backNo: document.getElementById("backNo"),
+  backBadge: document.getElementById("backBadge"),
+  questionText: document.getElementById("questionText"),
+  answerText: document.getElementById("answerText"),
+  noteText: document.getElementById("noteText"),
+  knownBtn: document.getElementById("knownBtn"),
+  reviewBtn: document.getElementById("reviewBtn"),
+  prevBtn: document.getElementById("prevBtn"),
+  nextBtn: document.getElementById("nextBtn"),
+  position: document.getElementById("position"),
+};
+
+/* ---- 科目フィルタの選択肢を作る ---- */
+function buildSubjectOptions() {
+  // 重複を除いた科目一覧を作成
+  const subjects = [];
+  CARDS.forEach(c => { if (!subjects.includes(c.subject)) subjects.push(c.subject); });
+
+  el.subjectFilter.innerHTML = "";
+  const optAll = document.createElement("option");
+  optAll.value = "__ALL__";
+  optAll.textContent = "すべての科目 (" + CARDS.length + ")";
+  el.subjectFilter.appendChild(optAll);
+
+  subjects.forEach(s => {
+    const count = CARDS.filter(c => c.subject === s).length;
+    const opt = document.createElement("option");
+    opt.value = s;
+    opt.textContent = s + " (" + count + ")";
+    el.subjectFilter.appendChild(opt);
+  });
+}
+
+/* ---- 配列をシャッフル（Fisher–Yates法） ---- */
+function shuffleArray(arr) {
+  const a = arr.slice(); // 元配列を壊さないようコピー
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/* ---- 出題する山札(deck)を組み立て直す ---- */
+function buildDeck() {
+  const subject = el.subjectFilter.value;
+  const reviewOnly = el.reviewToggle.checked;
+
+  // 1) 科目でしぼり込み
+  let list = CARDS.filter(c => subject === "__ALL__" || c.subject === subject);
+
+  // 2) 「要復習だけ」がONなら、要復習マークのカードだけに
+  if (reviewOnly) {
+    list = list.filter(c => marks[cardKey(c)] === "review");
+  }
+
+  // 3) シャッフルONなら順番をランダムに
+  if (el.shuffleToggle.checked) {
+    list = shuffleArray(list);
+  }
+
+  deck = list;
+  index = 0;
+  isFlipped = false;
+  render();
+}
+
+/* ---- 現在のカードを画面に描画 ---- */
+function render() {
+  // 出題対象が0件のとき
+  if (deck.length === 0) {
+    el.card.style.display = "none";
+    el.emptyMessage.style.display = "block";
+    el.emptyMessage.textContent = el.reviewToggle.checked
+      ? "「要復習」のカードがありません。\n通常表示に戻すか、カードに★をつけてください。"
+      : "表示できるカードがありません。";
+    el.position.textContent = "0 / 0";
+    updateNavButtons();
+    updateMarkButtons(null);
+    return;
+  }
+  el.card.style.display = "";
+  el.emptyMessage.style.display = "none";
+
+  const card = deck[index];
+
+  // 裏返り状態をリセット（新しいカードは必ず表から）
+  el.card.classList.toggle("is-flipped", isFlipped);
+
+  // 表面
+  el.frontSubject.textContent = card.subject;
+  el.frontNo.textContent = "No." + card.no;
+  el.questionText.textContent = card.question;
+
+  // 裏面
+  el.backSubject.textContent = card.subject;
+  el.backNo.textContent = "No." + card.no;
+  el.answerText.textContent = card.answer;
+  el.noteText.textContent = card.explanation || "";
+  el.noteText.style.display = card.explanation ? "" : "none";
+
+  // 位置表示（例: 3 / 20）
+  el.position.textContent = (index + 1) + " / " + deck.length;
+
+  updateMarkBadges(card);
+  updateMarkButtons(card);
+  updateNavButtons();
+}
+
+/* ---- カード上のマーク状態バッジを更新 ---- */
+function updateMarkBadges(card) {
+  const status = marks[cardKey(card)];
+  let text = "", cls = "mark-badge";
+  if (status === "known")  { text = "✓ 覚えた";  cls += " known"; }
+  if (status === "review") { text = "★ 要復習";  cls += " review"; }
+  el.frontBadge.textContent = text; el.frontBadge.className = cls;
+  el.backBadge.textContent  = text; el.backBadge.className  = cls;
+}
+
+/* ---- マークボタンの見た目（押されている状態）を更新 ---- */
+function updateMarkButtons(card) {
+  const status = card ? marks[cardKey(card)] : null;
+  el.knownBtn.classList.toggle("active-known",  status === "known");
+  el.reviewBtn.classList.toggle("active-review", status === "review");
+  const disabled = !card;
+  el.knownBtn.disabled = disabled;
+  el.reviewBtn.disabled = disabled;
+}
+
+/* ---- 前へ／次へボタンの有効・無効を更新 ---- */
+function updateNavButtons() {
+  el.prevBtn.disabled = deck.length === 0 || index <= 0;
+  el.nextBtn.disabled = deck.length === 0 || index >= deck.length - 1;
+}
+
+/* ---- カードを裏返す ---- */
+function flip() {
+  if (deck.length === 0) return;
+  isFlipped = !isFlipped;
+  el.card.classList.toggle("is-flipped", isFlipped);
+}
+
+/* ---- 移動（次へ／前へ） ---- */
+function go(step) {
+  const next = index + step;
+  if (next < 0 || next >= deck.length) return;
+  index = next;
+  isFlipped = false; // 新しいカードは表から表示
+  render();
+}
+
+/* ---- マークを付ける／外す（同じボタン再タップで解除） ---- */
+function toggleMark(status) {
+  if (deck.length === 0) return;
+  const key = cardKey(deck[index]);
+  if (marks[key] === status) {
+    delete marks[key]; // すでに同じ状態なら解除
+  } else {
+    marks[key] = status;
+  }
+  saveMarks();
+  render();
+}
+
+/* ============================================================
+   操作イベントの登録
+   ============================================================ */
+
+// フィルタ・トグルの変更で山札を作り直す
+el.subjectFilter.addEventListener("change", buildDeck);
+el.shuffleToggle.addEventListener("change", buildDeck);
+el.reviewToggle.addEventListener("change", buildDeck);
+
+// 前へ／次へボタン
+el.prevBtn.addEventListener("click", () => go(-1));
+el.nextBtn.addEventListener("click", () => go(1));
+
+// マークボタン
+el.knownBtn.addEventListener("click", () => toggleMark("known"));
+el.reviewBtn.addEventListener("click", () => toggleMark("review"));
+
+/* ---- カードの「タップで裏返し」と「スワイプで移動」 ----
+   指の移動量で判定：
+   ・横に大きく動いた → スワイプ（左で次へ／右で前へ）
+   ・ほぼ動かない     → タップ（裏返し） */
+let touchStartX = 0, touchStartY = 0, touchMoved = false;
+const SWIPE_THRESHOLD = 50; // これ以上横に動いたらスワイプ扱い(px)
+
+el.card.addEventListener("touchstart", (e) => {
+  const t = e.changedTouches[0];
+  touchStartX = t.clientX; touchStartY = t.clientY; touchMoved = false;
+}, { passive: true });
+
+el.card.addEventListener("touchmove", () => { touchMoved = true; }, { passive: true });
+
+el.card.addEventListener("touchend", (e) => {
+  const t = e.changedTouches[0];
+  const dx = t.clientX - touchStartX;
+  const dy = t.clientY - touchStartY;
+  // 横移動が大きく、かつ縦より横が優勢ならスワイプ
+  if (Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy)) {
+    if (dx < 0) go(1);   // 左スワイプ＝次へ
+    else        go(-1);  // 右スワイプ＝前へ
+  } else if (!touchMoved || (Math.abs(dx) < 10 && Math.abs(dy) < 10)) {
+    flip(); // ほぼ動いていない＝タップ
+  }
+});
+
+// マウス（PCブラウザ）用：クリックで裏返し
+// ※touch対応端末では touchend が先に処理され二重発火しないよう分岐
+let supportsTouch = ("ontouchstart" in window);
+el.card.addEventListener("click", () => { if (!supportsTouch) flip(); });
+
+// キーボード（PCでの確認用）：← → で移動、スペースで裏返し
+document.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowRight") go(1);
+  else if (e.key === "ArrowLeft") go(-1);
+  else if (e.key === " ") { e.preventDefault(); flip(); }
+});
+
+/* ============================================================
+   起動
+   ============================================================ */
+buildSubjectOptions();
+buildDeck();
+</script>
+</body>
+</html>
